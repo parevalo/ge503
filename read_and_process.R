@@ -73,16 +73,23 @@ var_list = c("EV_4", "PT_4", "TS_1", "TV_1", "BS_4", "HR_1", "NB_1", "PR_1")
 full_vars_stations = lapply(full_vars_list, FUN=filter, station %in% stations_id)
 def_vars_list = full_vars_stations[var_list]
 
-# Merge them all into a single tidy table!
+# Merge them all into a single almost tidy table!
 def_vars = do.call(rbind, def_vars_list)
 def_vars = rename(def_vars, date = Fecha)
 
-# Test plotting
-a = filter(def_vars, variable == 'EV_4')
-plot1 = ggplot(data=def_vars) + geom_point(mapping = aes(x=date, y=variable, colour=station, group=station)) + facet_grid(station~.)
-plot1
-plot1 %+% filter(def_vars, variable == 'PT_4')
+# Spread variables into columns to make it easier to plot vars against each other
+# The function takes care of the times and stations! WOW
+tidy_vars = spread(def_vars, variable, value)
 
+# Test plotting with first case
+plot1 = ggplot(data=def_vars) + geom_line(mapping = aes(x=date, y=value, colour=station, group=station)) + facet_grid(station~.)
+plot1 %+% filter(def_vars, variable == 'PT_4' & station == 31015010 & date > 1980)
+plot1 %+% filter(def_vars, variable == 'TS_1' & station == 31015010 & date > 1980)
+plot1 %+% filter(def_vars, variable == 'EV_4' & station == 31015010 & date > 1980)
+
+# Test plotting with tidy vars
+plot1 = ggplot(data=filter(test, station == 31015010)) + geom_line(mapping = aes(x=PT_4, y=EV_4, group=station))
+plot1
 
 # Calculate things by groups or anything
 test=ev %>%
