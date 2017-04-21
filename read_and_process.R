@@ -76,7 +76,7 @@ for(i in 1:length(full_vars_names)){
 }
 
 # Vars we care about
-var_list = c("EV_4", "PT_4", "TS_1", "TV_1", "BS_4", "HR_1", "NB_1", "PR_1")  
+var_list = c("PT_4", "PT_5", "PT_9", "BS_4", "EV_4", "HR_1", "NB_1", "PR_1", "TS_1", "TS_2", "TS_8", "TV_1")  
 
 # Filter only the stations we need for each of those vars and discard the rest
 # We need this to reduce the final dataframe and avoid memory problems
@@ -87,14 +87,20 @@ def_vars_list = full_vars_stations[var_list]
 def_vars = do.call(rbind, def_vars_list)
 def_vars = rename(def_vars, date = Fecha)
 
+# Remove all data before 1980 and outliers
+def_vars = filter(def_vars, date > "1980-01-01")
+def_vars = filter(def_vars, !(variable == 'EV_4' & value > 250)) 
+
+# Add labels for stations per land cover type/transformation levels
+low_transf = c(48015010, 31095010, 32155010, 42075010, 44135010, 47075010)
+medium_transf = c(32035010, 32035020, 44115020, 47045010, 44055010)
+other = c(44015040, 44015010) # Places with elevation 650 and 440, all the others are <300, just for reference
+def_vars = def_vars %>% mutate(lc_change = ifelse(station %in% low_transf, "low", ifelse(station %in% medium_transf, "medium", "high")))
+
 # Spread variables into columns to make it easier to plot vars against each other
 # The function takes care of the times and stations! WOW
 tidy_vars = spread(def_vars, variable, value)
 rm(full_vars_list)
-
-# Remove all data before 1980
-def_vars = filter(def_vars, date > "1980-01-01")
-tidy_vars = filter(tidy_vars, date > "1980-01-01")
 
 # Merge other vars like latlong, elevation
 def_vars = full_join(def_vars, stations_geo, by = "station")
@@ -103,16 +109,21 @@ tidy_vars = full_join(tidy_vars, stations_geo, by = "station")
 # Calculate mean of stations and  filter only those that have observations for ALL variables of interest.
 tidyvars_summary = tidy_vars %>%
   group_by(station) %>%
-  summarise_each(funs(mean(.,na.rm=T))) %>%
+  summarise_each(funs(mean(.,na.rm=T)), -lc_change) %>%
   filter(complete.cases(.))
 
 
 #options(tibble.print_max = Inf)
 best_stations = tidyvars_summary$station
 
+# Filter stations in higher elevations 
+best_stations = best_stations[!(best_stations %in% c(47015040, 47015080, 47015100, 44015030))]
+
 # Filter only the best stations
 def_filtered = filter(def_vars, station %in% best_stations)
 tidy_filtered = filter(tidy_vars, station %in% best_stations)
+
+
 
 ###############PLOTS
 
@@ -123,9 +134,21 @@ plot1 %+% filter(def_vars, variable == 'PT_4' & station == 31015010)
 plot1 %+% filter(def_vars, variable == 'TS_1' & station == 31015010)
 plot1 %+% filter(def_vars, variable == 'EV_4' & station == 31015010)
 
-# Test plotting with tidy vars
-plot1 = ggplot(data=tidy_filtered) + geom_line(mapping = aes(x=date, y=TS_1, group=station))+ facet_wrap(~station)
-plot1
+# Time vs single variable for all stations
+for(v in var_list){
+  ggplot(data=tidy_filtered) + geom_line(mapping = aes(x=date, y=get(v), group=station))+ facet_wrap(~station) + ylab(v)
+  ggsave(paste0("../results/plots/", v, "_per_station.png"), width = 20, height = 10)
+}
+
+# Var1 vs var2
+for(v1 in var_list){
+  for(v2 in var_list){
+    ggplot(data=tidy_filtered) + geom_line(mapping = aes(x=get(v1), y=get(v2), group=station))+ facet_wrap(~station) + 
+      xlab(v1) + ylab(v2)
+    ggsave(paste0("../results/plots/", v1, "_vs_", v2, "_per_station.png"), width = 20, height = 10)
+  }
+}
+
 
 # Plot a single station
 plot1 = ggplot(data=filter(tidy_filtered, station == 44035030)) + geom_line(mapping = aes(x=date, y=TS_1))
@@ -201,8 +224,6 @@ ts_plot = ggseasonplot(ts_test)
 ggplotly(ts_plot)
 
 #TODO
-# Create summary statistics and map those
-# Find "outlier" stations and outlier values
 
 #Summary stats per station/variable
 summary_stats = def_filtered %>%
@@ -217,11 +238,18 @@ summary_stats = def_filtered %>%
 
 summary_stats  
 
+# "Pooled trends"
+
+pool = ggplot(data=tidy_filtered) + geom_point(mapping = aes(x=PT_4, y=TS_1, group=station, color=station, size=elev))
+ggplotly(pool)
+
+pool2 = ggplot(data=tidy_filtered) + geom_boxplot(mapping = aes(x=date, y=TS_1, group=lc_change, color=lc_change))
+pool2
+
 ##### MAPS
 
 # Map of stations
-ggplot() +  geom_polygon(data=amazon, aes(x=long, y=lat, group=group)) + 
-  geom_point(data=tidy_vars, aes(x=long, y=lat), color="red") 
+ggplot() +  geom_polygon(data=amazon, aes(x=long, y=lat, group=group)) +geom_point(data=tidy_filtered, aes(x=long, y=lat,  color=lc_change)) 
 
 # Plot stats!
 ggplot() +  geom_polygon(data=amazon, aes(x=long, y=lat, group=group)) + 
@@ -229,3 +257,9 @@ ggplot() +  geom_polygon(data=amazon, aes(x=long, y=lat, group=group)) +
 
 
 
+##### NOTES
+# QGIS expr to filter stations: "CODIGO_CAT" IN  ('31015010', '31095010', '32035010', '32035020', '32105070', '32155010', 
+#'42075010', '44015010', '44015030', '44015040', '44035020', '44035030', '44045020', '44045030', '44055010', '44115020', 
+# '44135010', '46015010', '46035010', '47015040', '47015080', '47015100', '47045010', '47075010', '48015010')
+
+# stations with different patterns: 47015040, 47015080, 47015100, 44015030, all in higher elevations.
